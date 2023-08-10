@@ -1,52 +1,26 @@
 const express = require("express");
 const cors = require("cors");
-const { nanoid } = require("nanoid");
+const mongoose = require("mongoose");
+
+const chatWs = require("./app/chatWs");
+const users = require("./app/users");
 
 const app = express();
 require("express-ws")(app);
-
 const port = 8000;
 
 app.use(cors());
 
-const activeConnections = {};
-app.ws("/chat", function (ws, req) {
-    const id = nanoid();
-    console.log("client connected! id=", id);
+const runMongoose = async () => {
+    await mongoose.connect("mongodb://localhost/chat-ws", { useNewUrlParser: true });
+    console.log("mongoose connected");
 
-    activeConnections[id] = ws;
-    ws.on("close", (msg) => {
-        console.log("client disconnected! id=", id);
-        delete activeConnections[id];
+    app.use("/chat", chatWs());
+    app.use("/users", users());
+
+    app.listen(port, () => {
+        console.log(`Server started on ${port} port!`);
     });
+};
 
-    let username = "";
-    ws.on("message", (msg) => {
-        const decodedMessage = JSON.parse(msg);
-        switch (decodedMessage.type) {
-            case "SET_USERNAME":
-                username = decodedMessage.username;
-                break;
-
-            case "CREATE_MESSAGE":
-                Object.keys(activeConnections).forEach(connId => {
-                    const conn = activeConnections[connId];
-                    conn.send(JSON.stringify({
-                        type: "NEW_MESSAGE",
-                        message: {
-                            username,
-                            text: decodedMessage.text
-                        }
-                    }));
-                });
-                break;
-
-            default:
-                console.log("Unknown message type:", decodedMessage.type);
-        }
-    });
-});
-
-app.listen(port, () => {
-    console.log(`Server started on ${port} port!`);
-});
+runMongoose();

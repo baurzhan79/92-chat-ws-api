@@ -1,5 +1,4 @@
 const express = require("express");
-const { nanoid } = require("nanoid");
 
 const app = express();
 require("express-ws")(app);
@@ -10,35 +9,60 @@ const createRouterchatWS = () => {
     const activeConnections = {};
 
     router.ws("/", function (ws, req) {
-        const id = nanoid();
-        console.log("client connected! id=", id);
+        if (req.query.token) {
+            const token = req.query.token;
+            console.log("client connected! token=", token);
 
-        activeConnections[id] = ws;
-        ws.on("close", (msg) => {
-            console.log("client disconnected! id=", id);
-            delete activeConnections[id];
-        });
+            activeConnections[token] = {
+                connection: ws,
+                username: req.query.username
+            };
 
-        ws.on("message", (msg) => {
-            const decodedMessage = JSON.parse(msg);
-            switch (decodedMessage.type) {
-                case "CREATE_MESSAGE":
-                    Object.keys(activeConnections).forEach(connId => {
-                        const conn = activeConnections[connId];
-                        conn.send(JSON.stringify({
-                            type: "NEW_MESSAGE",
-                            message: {
-                                username: decodedMessage.username,
-                                text: decodedMessage.text
-                            }
-                        }));
-                    });
-                    break;
+            let onlineUsers = [];
 
-                default:
-                    console.log("Unknown message type:", decodedMessage.type);
-            }
-        });
+            Object.keys(activeConnections).forEach(connId => {
+                const conn = activeConnections[connId];
+                onlineUsers.push(conn.username);
+            });
+
+            ws.on("close", (msg) => {
+                console.log("client disconnected! token=", token);
+                delete activeConnections[token];
+
+                onlineUsers = [];
+
+                Object.keys(activeConnections).forEach(connId => {
+                    const conn = activeConnections[connId];
+                    onlineUsers.push(conn.username);
+                });
+
+                Object.keys(activeConnections).forEach(connId => {
+                    const conn = activeConnections[connId].connection;
+                    conn.send(JSON.stringify({
+                        type: "ONLINE_USERS",
+                        users: JSON.stringify(onlineUsers)
+                    }));
+                });
+            });
+
+            ws.on("message", (msg) => {
+                const decodedMessage = JSON.parse(msg);
+                switch (decodedMessage.type) {
+                    case "GET_ONLINE_USERS":
+                        Object.keys(activeConnections).forEach(connId => {
+                            const conn = activeConnections[connId].connection;
+                            conn.send(JSON.stringify({
+                                type: "ONLINE_USERS",
+                                users: JSON.stringify(onlineUsers)
+                            }));
+                        });
+                        break;
+
+                    default:
+                        console.log("Unknown message type:", decodedMessage.type);
+                }
+            });
+        }
     });
 
     return router;

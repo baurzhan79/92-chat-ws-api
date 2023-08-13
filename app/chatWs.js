@@ -1,9 +1,35 @@
 const express = require("express");
 
+const ChatMessages = require("./models/ChatMessages");
+
 const app = express();
 require("express-ws")(app);
 
 const router = express.Router();
+
+const messagesCount = 30;
+const getLastMessages = async (messagesCount) => {
+    try {
+        let data = [];
+
+        const allMessages = await ChatMessages.find().sort([["datetime", 1]]).populate("author");
+        allMessages.forEach(message => {
+            data.push({
+                username: message.author.username,
+                text: message.text
+            });
+        });
+
+        if (messagesCount === 0 || messagesCount >= data.length) return data;
+        else {
+            const lastMessages = data.slice(data.length - messagesCount);
+            return lastMessages;
+        }
+    }
+    catch (e) {
+        return [];
+    }
+}
 
 const createRouterchatWS = () => {
     const activeConnections = {};
@@ -45,7 +71,7 @@ const createRouterchatWS = () => {
                 });
             });
 
-            ws.on("message", (msg) => {
+            ws.on("message", async (msg) => {
                 const decodedMessage = JSON.parse(msg);
                 switch (decodedMessage.type) {
                     case "GET_ONLINE_USERS":
@@ -56,6 +82,44 @@ const createRouterchatWS = () => {
                                 users: JSON.stringify(onlineUsers)
                             }));
                         });
+
+                        break;
+
+                    case "GET_LAST_MESSAGES":
+                        const lastMessages = await getLastMessages(messagesCount);
+
+                        const conn = activeConnections[decodedMessage.token].connection;
+                        conn.send(JSON.stringify({
+                            type: "LAST_MESSAGES",
+                            messages: lastMessages
+                        }));
+
+                        break;
+
+                    case "CREATE_MESSAGE":
+                        const newMessage = new ChatMessages();
+                        newMessage.text = decodedMessage.text;
+                        newMessage.author = decodedMessage.userId;
+                        newMessage.datetime = new Date();
+
+                        try {
+                            await newMessage.save();
+
+                            Object.keys(activeConnections).forEach(connId => {
+                                const conn = activeConnections[connId].connection;
+                                conn.send(JSON.stringify({
+                                    type: "NEW_MESSAGE",
+                                    message: {
+                                        username: decodedMessage.username,
+                                        text: decodedMessage.text
+                                    }
+                                }));
+                            });
+                        }
+                        catch (error) {
+
+                        }
+
                         break;
 
                     default:
